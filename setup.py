@@ -24,7 +24,8 @@ def main():
             'counter',
             'photobooth',
             'pibooth',
-            'plugin'
+            'plugin',
+            'MQTT'
         ],
         py_modules=['pibooth_mqtt_counter'],
         python_requires=">=3.6",
