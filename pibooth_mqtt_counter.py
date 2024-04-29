@@ -4,7 +4,7 @@ import json
 from pibooth.utils import LOGGER
 from pibooth.counters import Counters
 
-__version__ = "1.0.0"
+__version__ = "1.0.1"
 
 mqtt_counters_attributes = ['mqtt_client', 'mqtt_topic', 'can_publish_mqtt']
 
@@ -59,6 +59,8 @@ class MqttCounters(Counters):
             msg_info = self.mqtt_client.publish(self.mqtt_topic, json.dumps(payload))
             msg_info.wait_for_publish()
             LOGGER.info('Counters published over MQTT')
+        except Exception as e:
+            LOGGER.error(f"Unable to publish counters over MQTT due to : {str(e)}")
         finally:
             self.mqtt_client.loop_stop()
 
@@ -81,7 +83,8 @@ def pibooth_startup(cfg, app):
     
 @pibooth.hookimpl
 def state_finish_exit(app):
-    app.count.publish_mqtt_counters('NewPhoto')
+    if isinstance(app.count, MqttCounters):
+        app.count.publish_mqtt_counters('NewPhoto')
 
 @pibooth.hookimpl
 def pibooth_cleanup(app):
