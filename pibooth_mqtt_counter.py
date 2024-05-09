@@ -40,7 +40,6 @@ class MqttCounters(Counters):
     def __setattr__(self, name, value):
         if name in mqtt_counters_attributes:
             super(Counters, self).__setattr__(name, value)
-            LOGGER.info(str(self.data))
             return
         super(MqttCounters, self).__setattr__(name, value)
 
