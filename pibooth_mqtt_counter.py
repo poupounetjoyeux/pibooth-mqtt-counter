@@ -86,6 +86,11 @@ def state_finish_exit(app):
         app.count.publish_mqtt_counters('NewPhoto')
 
 @pibooth.hookimpl
+def state_wait_do(self, cfg, app, events):
+    if app.printer.is_installed() and not app.printer.is_ready():
+        app.count.publish_mqtt_counters('MissPaper')
+
+@pibooth.hookimpl
 def pibooth_cleanup(app):
     if isinstance(app.count, MqttCounters):
         app.count.disconnect()
