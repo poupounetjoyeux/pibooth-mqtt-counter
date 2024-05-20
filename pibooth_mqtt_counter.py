@@ -4,7 +4,7 @@ import json
 from pibooth.utils import LOGGER
 from pibooth.counters import Counters
 
-__version__ = "1.0.1"
+__version__ = "1.0.2"
 
 mqtt_counters_attributes = ['mqtt_client', 'mqtt_topic', 'can_publish_mqtt']
 
