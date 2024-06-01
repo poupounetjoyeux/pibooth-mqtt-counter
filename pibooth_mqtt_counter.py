@@ -4,7 +4,7 @@ import json
 from pibooth.utils import LOGGER
 from pibooth.counters import Counters
 
-__version__ = "1.0.2"
+__version__ = "1.0.3"
 
 mqtt_counters_attributes = ['mqtt_client', 'mqtt_topic', 'can_publish_mqtt']
 
@@ -86,7 +86,7 @@ def state_finish_exit(app):
         app.count.publish_mqtt_counters('NewPhoto')
 
 @pibooth.hookimpl
-def state_wait_do(self, cfg, app, events):
+def state_wait_do(cfg, app):
     if app.printer.is_installed() and not app.printer.is_ready():
         app.count.publish_mqtt_counters('MissPaper')
 
