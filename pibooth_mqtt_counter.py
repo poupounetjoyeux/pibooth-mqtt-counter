@@ -5,9 +5,9 @@ import json
 from pibooth.utils import LOGGER
 from pibooth.counters import Counters
 
-__version__ = "1.0.4"
+__version__ = "1.0.5"
 
-mqtt_counters_attributes = ['mqtt_client', 'mqtt_topic', 'can_publish_mqtt']
+mqtt_counters_attributes = ['mqtt_client', 'mqtt_topic', 'can_publish_mqtt', 'print_started', 'miss_paper', 'lock', 'pending_msgs']
 
 class MqttCounters(Counters):
 
@@ -22,6 +22,8 @@ class MqttCounters(Counters):
             
         self.pending_msgs = []
         self.lock = threading.Lock()
+        self.miss_paper = False
+        self.print_started = False
 
         import paho.mqtt.client as mqtt
         self.mqtt_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, cfg.get('MQTT', 'client_id'))
@@ -93,10 +95,13 @@ class MqttCounters(Counters):
         if name in mqtt_counters_attributes:
             super(Counters, self).__setattr__(name, value)
             return
+        if name == 'printed' and value == self.printed + 1:
+            self.print_started = True
         super(MqttCounters, self).__setattr__(name, value)
 
     def reset(self):
         super(MqttCounters, self).reset()
+        self.miss_paper = False
         self.publish_mqtt_counters('Reset')
 
     def publish_mqtt_counters(self, event):
@@ -117,11 +122,25 @@ class MqttCounters(Counters):
         self.mqtt_client.unsubscribe(MqttCounters.get_reset_topic(self))
         self.mqtt_client.on_publish = None
         with self.lock:
+            LOGGER.info(f'There is {len(self.pending_msgs)} messages waiting to be published in the MQTT queue.. Waiting 3 seconds for publish to be finished..')
             for msg_info in self.pending_msgs:
-                msg_info.wait_for_publish()
+                msg_info.wait_for_publish(3.0)
         
         self.mqtt_client.disconnect()
         self.mqtt_client.loop_stop()
+
+
+def raise_printer_events(app):
+    if not isinstance(app.count, MqttCounters) or not app.printer.is_installed():
+        return
+        
+    if not app.printer.is_ready() and not app.count.miss_paper:
+        app.count.miss_paper = True
+        app.count.publish_mqtt_counters('MissPaper')
+
+    if app.count.print_started:
+        app.count.print_started = False
+        app.count.publish_mqtt_counters('PrintStarted')
 
 @pibooth.hookimpl
 def pibooth_configure(cfg):
@@ -136,16 +155,24 @@ def pibooth_configure(cfg):
 def pibooth_startup(cfg, app):
     app.count = MqttCounters(cfg, app.count)
     app.printer.count = app.count
-    
+
 @pibooth.hookimpl
-def state_finish_exit(app):
+def state_wait_enter(cfg, app, win):
+    if isinstance(app.count, MqttCounters):
+        app.count.print_started = False
+
+@pibooth.hookimpl
+def state_processing_exit(cfg, app, win):
     if isinstance(app.count, MqttCounters):
         app.count.publish_mqtt_counters('NewPhoto')
 
 @pibooth.hookimpl
-def state_wait_do(cfg, app):
-    if isinstance(app.count, MqttCounters) and app.printer.is_installed() and not app.printer.is_ready():
-        app.count.publish_mqtt_counters('MissPaper')
+def state_wait_do(cfg, app, win, events):
+    raise_printer_events(app)
+
+@pibooth.hookimpl
+def state_print_exit(cfg, app, win): 
+    raise_printer_events(app)
 
 @pibooth.hookimpl
 def pibooth_cleanup(app):

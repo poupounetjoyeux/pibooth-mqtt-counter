@@ -6,7 +6,7 @@ This can be used for example to display the current number of taken photos on a 
 ### Installation
 To install this plugin, you can simply use pip. pibooth will automatically enable discover and enable it
 ```
-pip install git+https://github.com/poupounetjoyeux/pibooth-mqtt-counter.git@v1.0.4
+pip install git+https://github.com/poupounetjoyeux/pibooth-mqtt-counter.git@v1.0.5
 ```
 
 ### Configuration
