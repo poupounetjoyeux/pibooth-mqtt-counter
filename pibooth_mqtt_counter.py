@@ -1,10 +1,11 @@
 """Plugin to send counters when its changing to an MQTT broker"""
 import pibooth
+import threading
 import json
 from pibooth.utils import LOGGER
 from pibooth.counters import Counters
 
-__version__ = "1.0.3"
+__version__ = "1.0.4"
 
 mqtt_counters_attributes = ['mqtt_client', 'mqtt_topic', 'can_publish_mqtt']
 
@@ -15,9 +16,19 @@ class MqttCounters(Counters):
         if 'kwargs' in self.data:
             del self.data['kwargs']
         
+        self.mqtt_topic = cfg.get('MQTT', 'topic')
+        if not self.mqtt_topic:
+            self.mqtt_topic = 'PiBooth'
+            
+        self.pending_msgs = []
+        self.lock = threading.Lock()
+
         import paho.mqtt.client as mqtt
         self.mqtt_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, cfg.get('MQTT', 'client_id'))
-        self.mqtt_topic = cfg.get('MQTT', 'topic')
+        self.mqtt_client.on_connect = MqttCounters.on_connect
+        self.mqtt_client.on_message = MqttCounters.on_message
+        self.mqtt_client.on_publish = MqttCounters.on_publish
+        self.mqtt_client.user_data_set(self)
         
         credentials = cfg.gettuple('MQTT', 'credentials', str)
         if credentials and len(credentials) == 2 and credentials[0] and credentials[1]:
@@ -26,11 +37,52 @@ class MqttCounters(Counters):
         try:
             host = cfg.get('MQTT', 'broker_host')
             self.mqtt_client.connect(host, int(cfg.getfloat('MQTT', 'broker_port')), 60)
+            self.mqtt_client.loop_start()
             LOGGER.info(f'Will push counters over MQTT broker {host}')
             self.can_publish_mqtt = True
         except Exception as e:
             LOGGER.error(f"Unable to connect to the MQTT broker {host} due to : {str(e)}")
             self.can_publish_mqtt = False
+            
+    def on_message(client, userdata, message):
+        if not isinstance(userdata, MqttCounters):
+            LOGGER.error(f"User data is not an MqttCounters..")
+            return
+            
+        reset_topic = MqttCounters.get_reset_topic(userdata)
+        if message.topic != reset_topic:
+            LOGGER.error(f"We received a not expected message on topic {message.topic}")
+            return
+        
+        if str(message.payload.decode("utf-8")).lower() != 'true':
+            LOGGER.warn(f'Message received on topic {reset_topic} is not : true')
+            return
+            
+        LOGGER.info("Recceived a valid reset counters signal from MQTT broker")
+        userdata.reset()
+        
+    def get_reset_topic(counter):
+        return f'{counter.mqtt_topic}/reset'
+            
+    def on_connect(client, userdata, flags, reason_code, properties):
+        if not isinstance(userdata, MqttCounters):
+            LOGGER.error(f"User data is not an MqttCounters..")
+            return
+            
+        if reason_code.is_failure:
+            LOGGER.error(f"Failed to connect: {reason_code}. will retry connection..")
+        else:
+            topic = MqttCounters.get_reset_topic(userdata)
+            client.subscribe(topic)
+            LOGGER.info(f"Subscribed to topic {topic}")
+            
+    def on_publish(client, userdata, mid, reason_code, properties):
+        if not isinstance(userdata, MqttCounters):
+            LOGGER.error(f"User data is not an MqttCounters..")
+            return
+            
+        with userdata.lock:
+            userdata.pending_msgs = list(filter(lambda msg: msg.mid != mid, userdata.pending_msgs))
 
     def __getattr__(self, name):
         if name in mqtt_counters_attributes:
@@ -50,21 +102,26 @@ class MqttCounters(Counters):
     def publish_mqtt_counters(self, event):
         if not self.can_publish_mqtt:
             return
-            
         try:
             payload = self.data.copy()
             payload['event'] = event
-            self.mqtt_client.loop_start()
-            msg_info = self.mqtt_client.publish(self.mqtt_topic, json.dumps(payload))
-            msg_info.wait_for_publish()
+            with self.lock:
+                msg_info = self.mqtt_client.publish(f'{self.mqtt_topic}/counters', json.dumps(payload))
+                self.pending_msgs.append(msg_info)
             LOGGER.info('Counters published over MQTT')
         except Exception as e:
             LOGGER.error(f"Unable to publish counters over MQTT due to : {str(e)}")
-        finally:
-            self.mqtt_client.loop_stop()
 
     def disconnect(self):
+        self.can_publish_mqtt = False
+        self.mqtt_client.unsubscribe(MqttCounters.get_reset_topic(self))
+        self.mqtt_client.on_publish = None
+        with self.lock:
+            for msg_info in self.pending_msgs:
+                msg_info.wait_for_publish()
+        
         self.mqtt_client.disconnect()
+        self.mqtt_client.loop_stop()
 
 @pibooth.hookimpl
 def pibooth_configure(cfg):
@@ -73,7 +130,7 @@ def pibooth_configure(cfg):
     cfg.add_option('MQTT', 'broker_port', '1883', "The MQTT broker port")
     cfg.add_option('MQTT', 'credentials', ('', ''), "The MQTT username and password if needed. Must be formated like (username, password)")
     cfg.add_option('MQTT', 'client_id', 'PiBooth', "The MQTT client_id")
-    cfg.add_option('MQTT', 'topic', 'PiBooth/counter', "The MQTT topic to publish to")
+    cfg.add_option('MQTT', 'topic', 'PiBooth', "The MQTT topic to publish to")
     
 @pibooth.hookimpl
 def pibooth_startup(cfg, app):
@@ -87,7 +144,7 @@ def state_finish_exit(app):
 
 @pibooth.hookimpl
 def state_wait_do(cfg, app):
-    if app.printer.is_installed() and not app.printer.is_ready():
+    if isinstance(app.count, MqttCounters) and app.printer.is_installed() and not app.printer.is_ready():
         app.count.publish_mqtt_counters('MissPaper')
 
 @pibooth.hookimpl

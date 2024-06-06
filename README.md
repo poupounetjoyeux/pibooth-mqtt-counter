@@ -6,7 +6,7 @@ This can be used for example to display the current number of taken photos on a 
 ### Installation
 To install this plugin, you can simply use pip. pibooth will automatically enable discover and enable it
 ```
-pip install git+https://github.com/poupounetjoyeux/pibooth-mqtt-counter.git@v1.0.3
+pip install git+https://github.com/poupounetjoyeux/pibooth-mqtt-counter.git@v1.0.4
 ```
 
 ### Configuration
@@ -27,8 +27,9 @@ credentials = ('username', 'password')
 # The MQTT client_id for the photobooth. Default is PiBooth
 client_id = PiBooth
 
-# The MQTT topic on which you want to publish counter updates. Default is PiBooth/counter
-topic = PiBooth/counter
+# The MQTT topic on which you want to publish/subscribe. Default is PiBooth meaning counters will be published over PiBooth/counters and reset events will be subscribed to PiBooth/reset
+# Reset payload must contains 'true' (case insensitive)
+topic = PiBooth
 ```
 
 ### Thanks
